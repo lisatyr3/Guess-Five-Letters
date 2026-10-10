@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Just 5 Letters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Palette: quiet garden greens, high-contrast feedback colors */
+    --bg:#eef2ec;
+    --panel:#ffffff;
+    --ink:#1d2a24;
+    --muted:#4d5a53;
+    --line:#b9c4b8;
+    --line-strong:#5f6b64;
+    --accent:#2a5d63;
+
+    --good:#2f7a4f;   --good-ink:#ffffff;   /* right letter, right spot */
+    --maybe:#e3b33d;  --maybe-ink:#1d2a24;  /* in the word, other spot  */
+    --bad:#6b6f74;    --bad-ink:#ffffff;    /* not in the word          */
+
+    --key:#dbe3d8;    --key-ink:#1d2a24;
+
+    /* Layout constants — set from JS (STAGE_W / STAGE_H) so CSS and JS stay in sync */
+    --stage-w:470px;
+    --stage-h:750px;
+  }
+
+  html,body{ height:100%; margin:0; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    overflow:hidden;
+    -webkit-tap-highlight-color:transparent;
+  }
+  button{ font-family:inherit; touch-action:manipulation; cursor:pointer; }
+  button:focus-visible{ outline:3px solid var(--accent); outline-offset:2px; }
+
+  /* Non-scrolling flex centering; the stage is scaled to fit */
+  .viewport{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .stage{
+    position:relative;
+    flex:0 0 auto;
+    width:var(--stage-w); height:var(--stage-h);
+    box-sizing:border-box;
+    padding:14px 12px;
+    display:flex; flex-direction:column; align-items:center;
+    transform-origin:center center;
+  }
+
+  h1{
+    font-family:"Playfair Display", Georgia, "Times New Roman", serif;
+    font-weight:800;
+    font-size:34px; line-height:40px; height:40px;
+    margin:0 0 8px;
+    letter-spacing:.3px;
+  }
+
+  .toolbar{ display:flex; gap:8px; width:100%; height:46px; margin-bottom:12px; }
+  .tool{
+    flex:1; height:46px;
+    border:2px solid var(--line); border-radius:10px;
+    background:var(--panel); color:var(--ink);
+    font-size:15px; font-weight:700;
+    padding:0 4px; white-space:nowrap;
+  }
+  .tool:hover{ border-color:var(--line-strong); }
+
+  /* Board: 6 rows × 5 tiles, 58px tiles, 7px gaps = 383px tall */
+  .board{ display:flex; flex-direction:column; gap:7px; height:383px; }
+  .row{ display:flex; gap:7px; }
+  .tile{
+    position:relative;
+    width:58px; height:58px; box-sizing:border-box;
+    border:2px solid var(--line); border-radius:8px;
+    background:var(--panel);
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; font-weight:800; text-transform:uppercase;
+    user-select:none;
+  }
+  .tile.filled{ border-color:var(--line-strong); }
+  .tile.good { background:var(--good);  border-color:var(--good);  color:var(--good-ink); }
+  .tile.maybe{ background:var(--maybe); border-color:var(--maybe); color:var(--maybe-ink); }
+  .tile.bad  { background:var(--bad);   border-color:var(--bad);   color:var(--bad-ink); }
+  /* Small symbols so color isn't the only signal */
+  .tile.good::after, .tile.maybe::after{
+    position:absolute; top:2px; right:5px;
+    font-size:13px; font-weight:800; line-height:1;
+  }
+  .tile.good::after{ content:"✓"; }
+  .tile.maybe::after{ content:"↔"; }
+
+  .tile.reveal{ animation:pop .32s ease both; }
+  @keyframes pop{ 0%{transform:scale(1)} 50%{transform:scale(1.08)} 100%{transform:scale(1)} }
+
+  .msg{
+    height:34px; line-height:34px; margin:8px 0;
+    font-size:18px; font-weight:700; text-align:center;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+  }
+  .msg.win{ color:var(--good); }
+  .msg.lose{ color:var(--accent); }
+  .msg.note{ color:var(--muted); }
+
+  /* Keyboard: 3 rows × 56px, 7px gaps = 182px */
+  .keyboard{ display:flex; flex-direction:column; gap:7px; width:100%; }
+  .kb-row{ display:flex; gap:6px; }
+  .kb-spacer{ flex:.5; }
+  .key{
+    flex:1; height:56px; padding:0;
+    border:0; border-radius:8px;
+    background:var(--key); color:var(--key-ink);
+    font-size:21px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+    transition:background-color .15s ease, color .15s ease;
+  }
+  .key.wide{ flex:1.6; font-size:15px; }
+  .key:active{ filter:brightness(.92); }
+  .key.good { background:var(--good);  color:var(--good-ink); }
+  .key.maybe{ background:var(--maybe); color:var(--maybe-ink); }
+  .key.bad  { background:var(--bad);   color:var(--bad-ink); }
+
+  /* Overlays live inside the stage so they scale with it */
+  .overlay{
+    position:absolute; inset:0; z-index:10;
+    background:rgba(238,242,236,.97);
+    display:none; align-items:center; justify-content:center;
+    padding:16px; box-sizing:border-box;
+  }
+  .overlay.open{ display:flex; }
+  .panel{
+    width:100%; box-sizing:border-box;
+    background:var(--panel);
+    border:2px solid var(--line); border-radius:16px;
+    padding:24px 22px;
+    font-size:18px; line-height:1.45;
+  }
+  .panel h2{
+    font-family:"Playfair Display", Georgia, serif;
+    font-size:28px; margin:0 0 12px; text-align:center;
+  }
+  .panel p{ margin:0 0 12px; }
+  .legend{ display:flex; flex-direction:column; gap:10px; margin:6px 0 14px; }
+  .legend-row{ display:flex; align-items:center; gap:14px; }
+  .legend-row .tile{ flex:0 0 auto; width:50px; height:50px; font-size:26px; }
+  .legend-row span{ font-size:17px; line-height:1.3; }
+
+  .big-btn{
+    display:block; width:100%; height:56px; margin-top:8px;
+    border:0; border-radius:12px;
+    background:var(--accent); color:#fff;
+    font-size:20px; font-weight:800;
+  }
+
+  .stat-grid{ display:flex; gap:8px; margin:6px 0 16px; }
+  .stat{ flex:1; text-align:center; }
+  .stat b{ display:block; font-size:30px; line-height:1.1; }
+  .stat span{ font-size:14px; color:var(--muted); line-height:1.2; display:block; }
+  .dist-title{ font-weight:800; margin-bottom:6px; }
+  .dist{ display:flex; flex-direction:column; gap:5px; margin-bottom:12px; }
+  .dist-row{ display:flex; align-items:center; gap:8px; font-size:16px; }
+  .dist-row .n{ width:14px; font-weight:800; }
+  .dist-bar{
+    min-width:28px; height:26px; border-radius:6px;
+    background:var(--bad); color:#fff;
+    display:flex; align-items:center; justify-content:flex-end;
+    padding:0 8px; box-sizing:border-box; font-weight:800;
+  }
+  .dist-bar.today{ background:var(--good); }
+  .center{ text-align:center; }
+
+  @media (prefers-reduced-motion: reduce){
+    .tile.reveal{ animation:none; }
+    .key{ transition:none; }
+  }
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="stage" id="stage">
+
+    <h1>Just 5 Letters</h1>
+
+    <div class="toolbar">
+      <button class="tool" id="helpBtn">How to Play</button>
+      <button class="tool" id="hintBtn">Hint</button>
+      <button class="tool" id="statsBtn">My Stats</button>
+      <button class="tool" id="soundBtn" aria-pressed="true">Sound On</button>
+    </div>
+
+    <div class="board" id="board" aria-label="Game board"></div>
+    <div class="msg" id="msg" role="status" aria-live="polite"></div>
+    <div class="keyboard" id="keyboard" aria-label="Letter keyboard"></div>
+
+    <!-- How to play -->
+    <div class="overlay" id="helpOverlay" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="panel">
+        <h2 id="helpTitle">How to Play</h2>
+        <p>Guess the hidden 5-letter word. You have 6 tries.</p>
+        <p>Tap letters on the keyboard, then tap <b>Enter</b>. Tap <b>Delete</b> to fix a letter.</p>
+        <p>After each guess, the tiles show how close you are:</p>
+        <div class="legend">
+          <div class="legend-row"><div class="tile good">W</div><span><b>Green ✓</b> — right letter, right spot.</span></div>
+          <div class="legend-row"><div class="tile maybe">O</div><span><b>Gold ↔</b> — in the word, but in a different spot.</span></div>
+          <div class="legend-row"><div class="tile bad">S</div><span><b>Gray</b> — not in the word.</span></div>
+        </div>
+        <p>Stuck? Tap <b>Hint</b> for one free letter. There's no timer, so take your time. A new word arrives every day at midnight.</p>
+        <button class="big-btn" id="helpClose">Start Playing</button>
+      </div>
+    </div>
+
+    <!-- Stats / end of game -->
+    <div class="overlay" id="statsOverlay" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+      <div class="panel">
+        <h2 id="statsTitle">My Stats</h2>
+        <p class="center" id="statsLine"></p>
+        <div class="stat-grid">
+          <div class="stat"><b id="stPlayed">0</b><span>Played</span></div>
+          <div class="stat"><b id="stPct">0</b><span>Won %</span></div>
+          <div class="stat"><b id="stCur">0</b><span>Current streak</span></div>
+          <div class="stat"><b id="stMax">0</b><span>Best streak</span></div>
+        </div>
+        <div class="dist-title">Wins by number of guesses</div>
+        <div class="dist" id="dist"></div>
+        <button class="big-btn" id="statsClose">Close</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------------------------------------------------------
+  // Layout constants (kept in sync with CSS via custom properties)
+  // ---------------------------------------------------------------
+  const STAGE_W = 470;
+  const STAGE_H = 750;
+  const MAX_SCALE = 1.4;
+  document.documentElement.style.setProperty("--stage-w", STAGE_W + "px");
+  document.documentElement.style.setProperty("--stage-h", STAGE_H + "px");
+
+  const stage = document.getElementById("stage");
+  function fit(){
+    const s = Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H, MAX_SCALE);
+    stage.style.transform = "scale(" + s + ")";
+  }
+  window.addEventListener("resize", fit);
+  fit();
+
+  // ---------------------------------------------------------------
+  // Answer list: common, friendly words; no plurals or obscure terms.
+  // Order is shuffled with a fixed seed so tomorrow's word can't be guessed
+  // from the list, and duplicates are removed automatically.
+  // ---------------------------------------------------------------
+  const WORDS = [
+    "ACORN","ADORE","AGAIN","ALBUM","ALIVE","AMBER","ANGEL","APPLE","APRON","AROMA",
+    "BACON","BADGE","BAGEL","BAKER","BANJO","BASIL","BEACH","BERRY","BIRCH","BLAZE",
+    "BLEND","BLOOM","BLUSH","BOOTH","BRAID","BRAIN","BRASS","BRAVE","BREAD","BRICK",
+    "BRIDE","BROOK","BROOM","BROWN","BRUSH","BUNNY","CABIN","CAMEL","CANDY","CANOE",
+    "CAROL","CARRY","CATCH","CEDAR","CHAIR","CHALK","CHARM","CHEER","CHESS","CHEST",
+    "CHILD","CHIME","CHORD","CIDER","CLEAN","CLEAR","CLOCK","CLOUD","CLOVE","COAST",
+    "COCOA","COMET","CORAL","COUCH","CRAFT","CRANE","CREAM","CREEK","CRISP","CROWN",
+    "CRUMB","CURVE","DAIRY","DAISY","DANCE","DINER","DONUT","DOUGH","DOZEN","DRAMA",
+    "DREAM","DRESS","DRIFT","EAGER","EAGLE","EARLY","EARTH","EMBER","ENJOY","EXTRA",
+    "FABLE","FAIRY","FAITH","FEAST","FENCE","FERRY","FIELD","FINAL","FLAME","FLOAT",
+    "FLOCK","FLOOR","FLOUR","FLUTE","FOCUS","FRAME","FRESH","FRONT","FROST","FRUIT",
+    "GIANT","GLASS","GLEAM","GLOBE","GLORY","GLOVE","GOOSE","GRACE","GRAIN","GRAND",
+    "GRAPE","GRASS","GRAVY","GREAT","GREEN","GREET","GRILL","GUEST","GUIDE","HAPPY",
+    "HAVEN","HAZEL","HEART","HEDGE","HOBBY","HONEY","HORSE","HOTEL","HOUSE","HUMAN",
+    "HUMOR","IMAGE","IVORY","JELLY","JEWEL","JOLLY","JUDGE","JUICE","KAYAK","KNACK",
+    "KNIFE","KOALA","LABEL","LADLE","LARGE","LATTE","LAUGH","LEAFY","LEARN","LEDGE",
+    "LEMON","LIGHT","LILAC","LINEN","LLAMA","LODGE","LOYAL","LUCKY","LUNCH","MAGIC",
+    "MANGO","MANOR","MAPLE","MARCH","MARSH","MATCH","MEDAL","MELON","MERRY","METAL",
+    "MIRTH","MONEY","MONTH","MOOSE","MOUSE","MOVIE","MUSIC","NIGHT","NOBLE","NORTH",
+    "NOVEL","NURSE","OASIS","OCEAN","OFFER","OLIVE","ONION","OPERA","ORBIT","ORDER",
+    "OTTER","OUNCE","OWNER","PAINT","PANDA","PANSY","PAPER","PARTY","PASTA","PATIO",
+    "PEACE","PEACH","PEARL","PECAN","PENNY","PERCH","PHONE","PHOTO","PIANO","PIECE",
+    "PILOT","PLACE","PLAID","PLANE","PLANT","PLAZA","PLUSH","POINT","POLKA","POPPY",
+    "PORCH","POUCH","POWER","PRICE","PRIDE","PRINT","PRIZE","PROUD","PUPPY","QUEEN",
+    "QUICK","QUIET","QUILT","RADIO","RAVEN","REACH","READY","RELAX","RIDGE","RIVER",
+    "ROAST","ROBIN","ROUND","ROUTE","ROYAL","RURAL","SALAD","SALSA","SAUCE","SCARF",
+    "SCENE","SCONE","SCORE","SHADE","SHARE","SHARP","SHEEP","SHELF","SHELL","SHINE",
+    "SHIRT","SHORE","SHORT","SIGHT","SKATE","SKILL","SLATE","SLEEP","SLOPE","SMALL",
+    "SMART","SMILE","SNACK","SOLVE","SOUND","SOUTH","SPACE","SPARK","SPEED","SPICE",
+    "SPOON","SPORT","STAGE","STAIR","STAND","START","STEAM","STEEL","STONE","STORM",
+    "STORY","STRAW","STYLE","SUGAR","SUNNY","SWEET","SWING","SYRUP","TABLE","TANGO",
+    "TASTE","TEACH","THANK","THEME","THICK","THINK","THROW","THYME","TIGER","TOAST",
+    "TODAY","TORCH","TOUCH","TOWER","TRACK","TRAIL","TRAIN","TREAT","TRUST","TRUTH",
+    "TULIP","TWICE","TWINE","UNITY","VALUE","VISIT","VIVID","VOICE","WAFER","WAGON",
+    "WALTZ","WATCH","WATER","WHALE","WHEAT","WHEEL","WHISK","WHITE","WHOLE","WORLD",
+    "WRITE","YACHT","YOUTH","ZEBRA","ZESTY"
+  ];
+  const UNIQUE = Array.from(new Set(WORDS.map(w => w.toUpperCase()).filter(w => /^[A-Z]{5}$/.test(w))));
+
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function shuffledList(seed){
+    const list = UNIQUE.slice();
+    const rnd = mulberry32(seed);
+    for(let i = list.length - 1; i > 0; i--){
+      const j = Math.floor(rnd() * (i + 1));
+      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+    }
+    return list;
+  }
+
+  // ---------------------------------------------------------------
+  // Daily word. Uses calendar-day math (Date.UTC on local Y/M/D),
+  // so daylight saving changes never repeat or skip a word.
+  // ---------------------------------------------------------------
+  function ymdLocal(d){
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function dayIndexLocal(d){
+    const today = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const base  = Date.UTC(2025, 0, 1);
+    return Math.round((today - base) / 86400000);
+  }
+  const NOW = new Date();
+  const TODAY = ymdLocal(NOW);
+  const DAY = dayIndexLocal(NOW);
+  const CYCLE = Math.floor(DAY / UNIQUE.length);        // reshuffle each time the list runs out
+  const LIST = shuffledList(20250101 + CYCLE);
+  const ANSWER = LIST[((DAY % LIST.length) + LIST.length) % LIST.length];
+
+  // ---------------------------------------------------------------
+  // Storage helpers
+  // ---------------------------------------------------------------
+  const DAY_PREFIX = "J5L2_";
+  const TODAY_KEY  = DAY_PREFIX + TODAY;
+  const STATS_KEY  = "J5L2_stats";
+  const SEEN_KEY   = "J5L2_seenHelp";
+  const SOUND_KEY  = "J5L2_sound";
+
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k, v); }catch(e){} }
+  function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+  function lsJSON(k){ try{ const r = lsGet(k); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
+
+  // Remove old daily saves (and saves from the earlier version of the game)
+  try{
+    for(let i = localStorage.length - 1; i >= 0; i--){
+      const k = localStorage.key(i);
+      if(!k) continue;
+      if(k.indexOf("J5L_") === 0) localStorage.removeItem(k);
+      else if(k.indexOf(DAY_PREFIX) === 0 && /\d{4}-\d{2}-\d{2}$/.test(k) && k !== TODAY_KEY) localStorage.removeItem(k);
+    }
+  }catch(e){}
+
+  // Testing aid: open the game URL with ?reset to clear today's game
+  try{ if(new URLSearchParams(location.search).has("reset")) lsDel(TODAY_KEY); }catch(e){}
+
+  // ---------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------
+  const MAX_TRIES = 6;
+  const saved = lsJSON(TODAY_KEY);
+  const state = {
+    guesses: (saved && Array.isArray(saved.guesses)) ? saved.guesses.filter(g => /^[A-Z]{5}$/.test(g)).slice(0, MAX_TRIES) : [],
+    done: !!(saved && saved.done),
+    win: !!(saved && saved.win),
+    hintPos: (saved && Number.isInteger(saved.hintPos)) ? saved.hintPos : null
+  };
+  let current = "";
+
+  function saveState(){
+    lsSet(TODAY_KEY, JSON.stringify({ guesses: state.guesses, done: state.done, win: state.win, hintPos: state.hintPos }));
+  }
+
+  // ---------------------------------------------------------------
+  // Sound (soft synthesized tones, toggle remembered)
+  // ---------------------------------------------------------------
+  let soundOn = lsGet(SOUND_KEY) !== "off";
+  let audioCtx = null;
+
+  function tone(freq, start, dur, vol, type){
+    const t = audioCtx.currentTime + start;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  function sfx(name){
+    if(!soundOn) return;
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === "suspended") audioCtx.resume();
+      switch(name){
+        case "tap":    tone(540, 0, 0.06, 0.03); break;
+        case "delete": tone(400, 0, 0.07, 0.03); break;
+        case "submit": tone(440, 0, 0.12, 0.04); tone(554, 0.08, 0.14, 0.04); break;
+        case "nudge":  tone(260, 0, 0.18, 0.035, "triangle"); break;
+        case "hint":   tone(660, 0, 0.10, 0.04); tone(880, 0.09, 0.18, 0.04); break;
+        case "win":    [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.38, 0.05)); break;
+        case "lose":   tone(392, 0, 0.30, 0.04); tone(330, 0.18, 0.40, 0.04); break;
+      }
+    }catch(e){}
+  }
+
+  // ---------------------------------------------------------------
+  // Scoring (handles repeated letters correctly)
+  // ---------------------------------------------------------------
+  function scoreGuess(guess, answer){
+    const out = Array(5).fill("bad");
+    const used = Array(5).fill(false);
+    for(let i = 0; i < 5; i++){
+      if(guess[i] === answer[i]){ out[i] = "good"; used[i] = true; }
+    }
+    for(let i = 0; i < 5; i++){
+      if(out[i] === "good") continue;
+      for(let j = 0; j < 5; j++){
+        if(!used[j] && answer[j] === guess[i]){ out[i] = "maybe"; used[j] = true; break; }
+      }
+    }
+    return out;
+  }
+  const RESULT_WORDS = { good: "right spot", maybe: "wrong spot", bad: "not in word" };
+
+  // ---------------------------------------------------------------
+  // Build board and keyboard
+  // ---------------------------------------------------------------
+  const boardEl = document.getElementById("board");
+  const kbEl = document.getElementById("keyboard");
+  const msgEl = document.getElementById("msg");
+  const tiles = [];
+  const rows = [];
+
+  for(let r = 0; r < MAX_TRIES; r++){
+    const row = document.createElement("div");
+    row.className = "row";
+    const rowTiles = [];
+    for(let c = 0; c < 5; c++){
+      const t = document.createElement("div");
+      t.className = "tile";
+      row.appendChild(t);
+      rowTiles.push(t);
+    }
+    boardEl.appendChild(row);
+    rows.push(row);
+    tiles.push(rowTiles);
+  }
+
+  const KB_LAYOUT = [
+    ["Q","W","E","R","T","Y","U","I","O","P"],
+    ["_","A","S","D","F","G","H","J","K","L","_"],
+    ["ENTER","Z","X","C","V","B","N","M","DELETE"]
+  ];
+  const keyEls = {};
+  KB_LAYOUT.forEach(keys => {
+    const rowDiv = document.createElement("div");
+    rowDiv.className = "kb-row";
+    keys.forEach(k => {
+      if(k === "_"){
+        const sp = document.createElement("div");
+        sp.className = "kb-spacer";
+        rowDiv.appendChild(sp);
+        return;
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "key" + (k.length > 1 ? " wide" : "");
+      b.textContent = k === "ENTER" ? "Enter" : k === "DELETE" ? "Delete" : k;
+      b.setAttribute("aria-label", k === "ENTER" ? "Enter guess" : k === "DELETE" ? "Delete letter" : k);
+      // Keep focus off on-screen keys for mouse/touch so a physical Enter can't double-fire
+      b.addEventListener("mousedown", e => e.preventDefault());
+      b.addEventListener("click", () => {
+        if(k === "ENTER") submitGuess();
+        else if(k === "DELETE") deleteLetter();
+        else addLetter(k);
+      });
+      if(k.length === 1) keyEls[k] = b;
+      rowDiv.appendChild(b);
+    });
+    kbEl.appendChild(rowDiv);
+  });
+
+  // ---------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------
+  const ORDINALS = ["first","second","third","fourth","fifth"];
+  function hintText(){ return "Hint: the " + ORDINALS[state.hintPos] + " letter is " + ANSWER[state.hintPos] + "."; }
+
+  function setMessage(text, kind){
+    msgEl.textContent = text || "";
+    msgEl.className = "msg" + (kind ? " " + kind : "");
+  }
+  function defaultMessage(){
+    if(state.done){
+      if(state.win) setMessage("You solved it! New word tomorrow.", "win");
+      else setMessage("Today's word was " + ANSWER + ". New word tomorrow.", "lose");
+    }else if(state.hintPos !== null){
+      setMessage(hintText(), "note");
+    }else{
+      setMessage("");
+    }
+  }
+
+  function render(revealRow){
+    for(let r = 0; r < MAX_TRIES; r++){
+      const g = state.guesses[r];
+      const scores = g ? scoreGuess(g, ANSWER) : null;
+      const labels = [];
+      for(let c = 0; c < 5; c++){
+        const t = tiles[r][c];
+        t.className = "tile";
+        t.style.animationDelay = "";
+        if(g){
+          t.textContent = g[c];
+          t.classList.add(scores[c]);
+          labels.push(g[c] + " " + RESULT_WORDS[scores[c]]);
+          if(r === revealRow){
+            t.classList.add("reveal");
+            t.style.animationDelay = (c * 90) + "ms";
+          }
+        }else if(r === state.guesses.length && !state.done){
+          t.textContent = current[c] || "";
+          if(current[c]) t.classList.add("filled");
+        }else{
+          t.textContent = "";
+        }
+      }
+      rows[r].setAttribute("aria-label", g ? "Guess " + (r+1) + ": " + labels.join(", ") : "Guess " + (r+1) + ": empty");
+    }
+
+    // Keyboard colors: green beats gold, gold beats gray
+    const rank = { bad: 1, maybe: 2, good: 3 };
+    const best = {};
+    state.guesses.forEach(g => {
+      const s = scoreGuess(g, ANSWER);
+      for(let i = 0; i < 5; i++){
+        if(!best[g[i]] || rank[s[i]] > rank[best[g[i]]]) best[g[i]] = s[i];
+      }
+    });
+    Object.keys(keyEls).forEach(L => {
+      const k = keyEls[L];
+      k.classList.remove("good","maybe","bad");
+      if(best[L]) k.classList.add(best[L]);
+      k.setAttribute("aria-label", L + (best[L] ? ", " + RESULT_WORDS[best[L]] : ""));
+    });
+
+    document.getElementById("hintBtn").textContent = state.hintPos !== null ? "See Hint" : "Hint";
+  }
+
+  // ---------------------------------------------------------------
+  // Play
+  // ---------------------------------------------------------------
+  function addLetter(L){
+    if(state.done || current.length >= 5) return;
+    current += L;
+    sfx("tap");
+    defaultMessage();
+    render();
+  }
+  function deleteLetter(){
+    if(state.done || !current.length) return;
+    current = current.slice(0, -1);
+    sfx("delete");
+    defaultMessage();
+    render();
+  }
+
+  const PRAISE = ["Amazing — first try!", "Wonderful!", "Excellent!", "Great job!", "Well done!", "Phew — you got it!"];
+
+  function submitGuess(){
+    if(state.done) return;
+    if(current.length < 5){
+      const left = 5 - current.length;
+      setMessage("Add " + left + " more letter" + (left === 1 ? "" : "s") + ", then tap Enter.", "note");
+      sfx("nudge");
+      return;
+    }
+    if(state.guesses.indexOf(current) !== -1){
+      setMessage("You already tried " + current + ". Try a different word.", "note");
+      sfx("nudge");
+      return;
+    }
+
+    state.guesses.push(current);
+    const row = state.guesses.length - 1;
+    const won = current === ANSWER;
+    current = "";
+
+    if(won){ state.done = true; state.win = true; }
+    else if(state.guesses.length >= MAX_TRIES){ state.done = true; state.win = false; }
+    saveState();
+    render(row);
+
+    if(state.done){
+      recordResult();
+      if(state.win){ setMessage(PRAISE[row], "win"); sfx("win"); }
+      else { setMessage("Good try! The word was " + ANSWER + ".", "lose"); sfx("lose"); }
+      setTimeout(() => openStats(false), 1400);
+    }else{
+      sfx("submit");
+      defaultMessage();
+    }
+  }
+
+  function useHint(){
+    if(state.done){ defaultMessage(); return; }
+    if(state.hintPos === null){
+      const greens = new Set();
+      state.guesses.forEach(g => scoreGuess(g, ANSWER).forEach((s, i) => { if(s === "good") greens.add(i); }));
+      const order = [2, 0, 4, 1, 3];
+      const pos = order.find(i => !greens.has(i));
+      if(pos === undefined) return;
+      state.hintPos = pos;
+      saveState();
+      sfx("hint");
+      render();
+    }
+    setMessage(hintText(), "note");
+  }
+
+  // ---------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------
+  function loadStats(){
+    const s = lsJSON(STATS_KEY) || {};
+    return {
+      played: s.played || 0,
+      won: s.won || 0,
+      cur: s.cur || 0,
+      max: s.max || 0,
+      dist: (Array.isArray(s.dist) && s.dist.length === 6) ? s.dist : [0,0,0,0,0,0],
+      lastDay: (typeof s.lastDay === "number") ? s.lastDay : null,
+      lastWinDay: (typeof s.lastWinDay === "number") ? s.lastWinDay : null
+    };
+  }
+  function recordResult(){
+    const st = loadStats();
+    if(st.lastDay === DAY) return;  // count each day once
+    st.played++;
+    st.lastDay = DAY;
+    if(state.win){
+      st.won++;
+      st.cur = (st.lastWinDay === DAY - 1) ? st.cur + 1 : 1;
+      st.max = Math.max(st.max, st.cur);
+      st.lastWinDay = DAY;
+      st.dist[state.guesses.length - 1]++;
+    }else{
+      st.cur = 0;
+    }
+    lsSet(STATS_KEY, JSON.stringify(st));
+  }
+
+  // ---------------------------------------------------------------
+  // Overlays
+  // ---------------------------------------------------------------
+  const helpOv = document.getElementById("helpOverlay");
+  const statsOv = document.getElementById("statsOverlay");
+  let lastFocus = null;
+
+  function openOverlay(ov, focusBtn, moveFocus){
+    lastFocus = document.activeElement;
+    ov.classList.add("open");
+    if(moveFocus) focusBtn.focus();
+  }
+  function closeOverlays(){
+    const wasOpen = helpOv.classList.contains("open") || statsOv.classList.contains("open");
+    if(helpOv.classList.contains("open")) lsSet(SEEN_KEY, "1");
+    helpOv.classList.remove("open");
+    statsOv.classList.remove("open");
+    if(wasOpen && lastFocus && lastFocus.focus && lastFocus !== document.body) lastFocus.focus();
+  }
+  function overlayOpen(){ return helpOv.classList.contains("open") || statsOv.classList.contains("open"); }
+
+  function openStats(moveFocus){
+    const st = loadStats();
+    const curShown = (st.lastWinDay === DAY || st.lastWinDay === DAY - 1) ? st.cur : 0;
+    document.getElementById("stPlayed").textContent = st.played;
+    document.getElementById("stPct").textContent = st.played ? Math.round(st.won / st.played * 100) : 0;
+    document.getElementById("stCur").textContent = curShown;
+    document.getElementById("stMax").textContent = st.max;
+
+    const title = document.getElementById("statsTitle");
+    const line = document.getElementById("statsLine");
+    if(state.done && state.win){
+      title.textContent = "You got it!";
+      line.textContent = "Today's word: " + ANSWER + ", in " + state.guesses.length + (state.guesses.length === 1 ? " guess." : " guesses.");
+    }else if(state.done){
+      title.textContent = "Good try!";
+      line.textContent = "Today's word was " + ANSWER + ". Come back tomorrow for a new one.";
+    }else{
+      title.textContent = "My Stats";
+      line.textContent = "Today's game is still in progress.";
+    }
+
+    const distEl = document.getElementById("dist");
+    distEl.innerHTML = "";
+    const maxN = Math.max(1, ...st.dist);
+    st.dist.forEach((n, i) => {
+      const row = document.createElement("div");
+      row.className = "dist-row";
+      const label = document.createElement("span");
+      label.className = "n";
+      label.textContent = i + 1;
+      const bar = document.createElement("div");
+      bar.className = "dist-bar" + (state.done && state.win && state.guesses.length === i + 1 ? " today" : "");
+      bar.style.width = Math.max(8, Math.round(n / maxN * 100)) + "%";
+      bar.textContent = n;
+      row.appendChild(label);
+      row.appendChild(bar);
+      distEl.appendChild(row);
+    });
+
+    openOverlay(statsOv, document.getElementById("statsClose"), moveFocus);
+  }
+
+  // Mouse/touch clicks on toolbar buttons shouldn't keep focus, so a physical Enter still submits a guess
+  document.querySelectorAll(".tool").forEach(b => b.addEventListener("mousedown", e => e.preventDefault()));
+  document.getElementById("helpBtn").addEventListener("click", () => openOverlay(helpOv, document.getElementById("helpClose"), true));
+  document.getElementById("helpClose").addEventListener("click", closeOverlays);
+  document.getElementById("statsBtn").addEventListener("click", () => openStats(true));
+  document.getElementById("statsClose").addEventListener("click", closeOverlays);
+  document.getElementById("hintBtn").addEventListener("click", useHint);
+
+  const soundBtn = document.getElementById("soundBtn");
+  function renderSound(){
+    soundBtn.textContent = soundOn ? "Sound On" : "Sound Off";
+    soundBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+  }
+  soundBtn.addEventListener("click", () => {
+    soundOn = !soundOn;
+    lsSet(SOUND_KEY, soundOn ? "on" : "off");
+    renderSound();
+    sfx("tap");
+  });
+
+  // Physical keyboard
+  document.addEventListener("keydown", e => {
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+    if(overlayOpen()){
+      if(e.key === "Escape"){ e.preventDefault(); closeOverlays(); }
+      return;
+    }
+    const onTool = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("tool");
+    if(e.key === "Enter"){
+      if(onTool) return; // let toolbar buttons work normally
+      e.preventDefault();
+      submitGuess();
+    }else if(e.key === "Backspace"){
+      e.preventDefault();
+      deleteLetter();
+    }else if(/^[a-zA-Z]$/.test(e.key)){
+      addLetter(e.key.toUpperCase());
+    }
+  });
+
+  // New word at midnight, even if the page stays open
+  function checkDay(){ if(ymdLocal(new Date()) !== TODAY) location.reload(); }
+  setInterval(checkDay, 60000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) checkDay(); });
+
+  // ---------------------------------------------------------------
+  // Start
+  // ---------------------------------------------------------------
+  renderSound();
+  render();
+  defaultMessage();
+  if(!lsGet(SEEN_KEY)) openOverlay(helpOv, document.getElementById("helpClose"), false);
+})();
+</script>
+</body>
+</html>
